@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>FTC Robot Dashboard</title>
+<style>
+  :root { --bg:#0f1420; --panel:#1a2130; --line:#2a3446; --fg:#e6ecf5; --accent:#4da3ff; --ok:#3ad29f; --warn:#ff6b6b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:'Malgun Gothic',sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:12px 18px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:16px; }
+  header h1 { font-size:16px; margin:0; }
+  .status { font-size:13px; padding:3px 10px; border-radius:12px; background:var(--panel); }
+  .status.on { color:var(--ok); } .status.off { color:var(--warn); }
+  .wrap { display:flex; gap:16px; padding:16px; flex-wrap:wrap; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  canvas { background:#0b0f18; border-radius:8px; cursor:crosshair; display:block; }
+  .metrics { min-width:220px; }
+  .metric { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--line); font-size:14px; }
+  .metric span:last-child { font-variant-numeric:tabular-nums; color:var(--accent); }
+  .controls { margin-top:12px; display:flex; flex-direction:column; gap:8px; }
+  .controls label { font-size:12px; color:#9fb0c8; }
+  .row { display:flex; gap:6px; }
+  input { width:70px; background:#0b0f18; border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:6px; }
+  button { background:var(--accent); color:#04101f; border:none; border-radius:6px; padding:8px 12px; font-weight:600; cursor:pointer; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--fg); }
+  .hint { font-size:12px; color:#7f8ea8; margin-top:8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>FTC Robot Dashboard</h1>
+  <span id="conn" class="status off">연결 끊김</span>
+  <span class="hint">필드를 클릭하면 그 좌표로 goto 명령이 전송됩니다</span>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <canvas id="field" width="520" height="520"></canvas>
+  </div>
+
+  <div class="card metrics">
+    <div class="metric"><span>X (m)</span><span id="mx">–</span></div>
+    <div class="metric"><span>Y (m)</span><span id="my">–</span></div>
+    <div class="metric"><span>Heading (°)</span><span id="mh">–</span></div>
+    <div class="metric"><span>Slip (rad/s)</span><span id="ms">–</span></div>
+    <div class="metric"><span>RTT (ms)</span><span id="mrtt">–</span></div>
+
+    <div class="controls">
+      <label>목표 goto 직접 입력 (x, y [m], heading [°])</label>
+      <div class="row">
+        <input id="gx" type="number" step="0.1" value="1.0">
+        <input id="gy" type="number" step="0.1" value="0.5">
+        <input id="gh" type="number" step="5" value="90">
+      </div>
+      <div class="row">
+        <button onclick="sendGoto()">goto 전송</button>
+        <button class="ghost" onclick="sendPing()">ping (RTT)</button>
+        <button class="ghost" onclick="clearTrail()">궤적 지우기</button>
+      </div>
+    </div>
+    <div class="hint">스케일: 화면 반경 = <span id="scaleLabel">2.5</span> m</div>
+  </div>
+</div>
+
+<script>
+const VIEW_M = 2.5;                 // 화면 중심에서 가장자리까지 몇 미터를 표시할지
+const cv = document.getElementById('field');
+const ctx = cv.getContext('2d');
+const W = cv.width, H = cv.height, CX = W/2, CY = H/2;
+const scale = (Math.min(W, H)/2) / VIEW_M;   // px per meter
+document.getElementById('scaleLabel').textContent = VIEW_M;
+
+let trail = [];
+let lastHeadingDeg = 0;
+
+// 필드좌표(x 전방, y 좌측) -> 화면픽셀.
+// 화면은 x축=위(전방), y축=왼쪽으로 그림 (top-down, 전방이 위로).
+function fieldToPx(x, y) {
+  return { px: CX - y * scale, py: CY - x * scale };
+}
+function pxToField(px, py) {
+  return { x: (CY - py) / scale, y: (CX - px) / scale };
+}
+
+function drawGrid() {
+  ctx.clearRect(0, 0, W, H);
+  ctx.strokeStyle = '#1c2536'; ctx.lineWidth = 1;
+  for (let m = -Math.floor(VIEW_M); m <= VIEW_M; m++) {
+    let a = fieldToPx(m, -VIEW_M), b = fieldToPx(m, VIEW_M);
+    ctx.beginPath(); ctx.moveTo(a.px, a.py); ctx.lineTo(b.px, b.py); ctx.stroke();
+    let c = fieldToPx(-VIEW_M, m), d = fieldToPx(VIEW_M, m);
+    ctx.beginPath(); ctx.moveTo(c.px, c.py); ctx.lineTo(d.px, d.py); ctx.stroke();
+  }
+  // 원점 축
+  ctx.strokeStyle = '#33405a'; ctx.lineWidth = 1.5;
+  let o = fieldToPx(0,0), xf = fieldToPx(0.5,0), yf = fieldToPx(0,0.5);
+  ctx.strokeStyle='#c0504d'; ctx.beginPath(); ctx.moveTo(o.px,o.py); ctx.lineTo(xf.px,xf.py); ctx.stroke(); // +X 전방 빨강
+  ctx.strokeStyle='#4da3ff'; ctx.beginPath(); ctx.moveTo(o.px,o.py); ctx.lineTo(yf.px,yf.py); ctx.stroke(); // +Y 좌측 파랑
+}
+
+function drawTrail() {
+  if (trail.length < 2) return;
+  ctx.strokeStyle = 'rgba(77,163,255,0.5)'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  trail.forEach((p, i) => {
+    let s = fieldToPx(p.x, p.y);
+    if (i === 0) ctx.moveTo(s.px, s.py); else ctx.lineTo(s.px, s.py);
+  });
+  ctx.stroke();
+}
+
+function drawRobot(x, y, hRad) {
+  let s = fieldToPx(x, y);
+  // 몸체
+  ctx.fillStyle = '#3ad29f';
+  ctx.beginPath(); ctx.arc(s.px, s.py, 12, 0, Math.PI*2); ctx.fill();
+  // heading 화살표 (로봇 전방 = 로컬 +x)
+  let hx = x + 0.35*Math.cos(hRad), hy = y + 0.35*Math.sin(hRad);
+  let hs = fieldToPx(hx, hy);
+  ctx.strokeStyle = '#04101f'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(s.px, s.py); ctx.lineTo(hs.px, hs.py); ctx.stroke();
+}
+
+function render(pose) {
+  drawGrid();
+  drawTrail();
+  if (pose) drawRobot(pose.x, pose.y, pose.h);
+}
+
+async function poll() {
+  try {
+    const r = await fetch('/state');
+    const st = await r.json();
+    const connEl = document.getElementById('conn');
+    if (st.connected) { connEl.textContent='연결됨'; connEl.className='status on'; }
+    else { connEl.textContent='연결 끊김'; connEl.className='status off'; }
+
+    if (st.pose) {
+      const p = st.pose;
+      document.getElementById('mx').textContent = p.x.toFixed(3);
+      document.getElementById('my').textContent = p.y.toFixed(3);
+      const deg = (p.h*180/Math.PI); lastHeadingDeg = deg;
+      document.getElementById('mh').textContent = deg.toFixed(1);
+      document.getElementById('ms').textContent = p.slip.toFixed(3);
+      trail.push({x:p.x, y:p.y});
+      if (trail.length > 400) trail.shift();
+      render(p);
+    } else {
+      render(null);
+    }
+    document.getElementById('mrtt').textContent = (st.rtt != null) ? st.rtt.toFixed(1) : '–';
+  } catch(e) {
+    document.getElementById('conn').textContent = '브리지 응답없음';
+  }
+}
+
+function sendGoto() {
+  const x = parseFloat(document.getElementById('gx').value);
+  const y = parseFloat(document.getElementById('gy').value);
+  const h = parseFloat(document.getElementById('gh').value);
+  fetch(`/goto?x=${x}&y=${y}&h=${h}`);
+}
+function sendPing() { fetch('/ping'); }
+function clearTrail() { trail = []; }
+
+// 필드 클릭 -> 그 좌표로 goto (heading은 현재 입력칸 값 사용)
+cv.addEventListener('click', (e) => {
+  const rect = cv.getBoundingClientRect();
+  const f = pxToField(e.clientX - rect.left, e.clientY - rect.top);
+  document.getElementById('gx').value = f.x.toFixed(2);
+  document.getElementById('gy').value = f.y.toFixed(2);
+  const h = parseFloat(document.getElementById('gh').value);
+  fetch(`/goto?x=${f.x.toFixed(3)}&y=${f.y.toFixed(3)}&h=${h}`);
+});
+
+drawGrid();
+setInterval(poll, 100);   // 10Hz 폴링
+</script>
+</body>
+</html>
