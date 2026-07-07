@@ -30,9 +30,13 @@ public class Localizer {
     // === goBILDA 오도메트리 팟 기준값 (일부 실측 권장) ==========================
     // goBILDA Odometry Pod: 휠 지름 48mm → 반지름 0.024m
     private static final double DEAD_WHEEL_RADIUS = 0.024; // m
-    // goBILDA 오도팟 내장 엔코더: 2000 틱/회전
-    // TODO: 제품번호 확인 — 3110-0001-0001 계열이면 2000 CPR 맞음. 다르면 교체.
-    private static final double ODO_TICKS_PER_REV = 2000;  // 틱/회전
+    // 실측 보정 (규칙 7): 1m 반복 측정으로 수렴. CPR 2619→1.1 나와 2881로 재보정.
+    //   손push 특성상 ±5~10% 노이즈 존재. 실제 모터 주행 시 더 정확.
+    private static final double ODO_TICKS_PER_REV = 2881;  // 틱/회전 (실측 보정값)
+    // 데드휠 회전 방향 부호 (장착 방향에 따라 결정, 실측으로 확정).
+    // 실측: 앞으로 미는데 X가 음수로 나옴 → parallel 부호 뒤집음(-1).
+    private static final double PARALLEL_DIR = -1.0;
+    private static final double PERP_DIR = +1.0;           // 좌측→Y+ 정상이라 유지
     // TODO: 실측 필요 — 데드휠 장착 오프셋 (로봇 중심 기준, 방향검증 후 정밀 측정)
     //   PARALLEL_OFFSET: 전진 휠이 중심에서 Y로 떨어진 거리 (m)
     //   PERP_OFFSET:     스트레이프 휠이 중심에서 X로 떨어진 거리 (m)
@@ -102,9 +106,9 @@ public class Localizer {
         // heading 변화량 (랩어라운드 -pi~pi 정규화)
         double dHeading = normalizeAngle(heading - prevHeadingRad);
 
-        // 틱 변화량 -> 거리 (m)
-        double dPar = (parTicks - prevParallelTicks) * ODO_M_PER_TICK;
-        double dPerp = (perpTicks - prevPerpTicks) * ODO_M_PER_TICK;
+        // 틱 변화량 -> 거리 (m), 장착 방향 부호 적용
+        double dPar = (parTicks - prevParallelTicks) * ODO_M_PER_TICK * PARALLEL_DIR;
+        double dPerp = (perpTicks - prevPerpTicks) * ODO_M_PER_TICK * PERP_DIR;
 
         // 회전에 의한 데드휠 회전분 보정 -> 순수 로컬 병진 성분
         double localDx = dPar - PARALLEL_OFFSET * dHeading;
