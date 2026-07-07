@@ -56,6 +56,36 @@ public class DriveSubsystem extends SubsystemBase {
         }
     }
 
+    /** 개루프 주행 모드로 전환 (경로추종용). 위치는 데드휠 오도로 잰다. */
+    public void setOpenLoop() {
+        for (DcMotorEx motor : new DcMotorEx[]{lf, rf, lb, rb}) {
+            motor.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+        }
+    }
+
+    /**
+     * 로봇 로컬 프레임 섀시 속도 명령으로 바퀴 출력을 설정 (개루프).
+     * 메카넘 역기구학(정규화된 형태) 그대로 사용. sim mecanum_inverse_kinematics와 동일 부호.
+     *
+     * @param vx 전방 성분 (+forward), 대략 -1~1
+     * @param vy 좌측 성분 (+left)
+     * @param w  회전 성분 (+CCW)
+     */
+    public void driveRobotRelative(double vx, double vy, double w) {
+        double lfP = vx - vy - w;
+        double rfP = vx + vy + w;
+        double lbP = vx + vy - w;
+        double rbP = vx - vy + w;
+
+        // 최댓값이 1을 넘으면 전체를 비례 축소 (방향 유지하며 포화 방지)
+        double max = Math.max(1.0, Math.max(Math.abs(lfP),
+                Math.max(Math.abs(rfP), Math.max(Math.abs(lbP), Math.abs(rbP)))));
+        lf.setPower(lfP / max);
+        rf.setPower(rfP / max);
+        lb.setPower(lbP / max);
+        rb.setPower(rbP / max);
+    }
+
     /** 네 모터 중 하나라도 목표 위치에 도달하지 못했으면 true. */
     public boolean isBusy() {
         return lf.isBusy() || rf.isBusy() || lb.isBusy() || rb.isBusy();
