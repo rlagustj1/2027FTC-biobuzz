@@ -115,6 +115,32 @@ else:
 
 ## 프로젝트 기술 스택
 
-- FTC SDK 10.1.1 + FTCLib 2.1.1 (Java 11)
-- 팀 코드 위치: `app/src/main/java/org/firstinspires/ftc/teamcode/`
+- **공식 FtcRobotController 구조** (SDK 11.0) + FTCLib 2.1.1
+- 팀 코드 위치: `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/`
+- 배포: `./gradlew :TeamCode:installDebug` (USB), RC 앱 = `com.qualcomm.ftcrobotcontroller`
 - 시뮬레이션: Python (numpy/matplotlib), 검증 후에만 Java로 이식
+- 외부 PC: `pc/` (통신 클라이언트, 웹 대시보드, AI 오케스트레이터)
+
+## 규칙 8: FTC 파일은 정해진 패키지 구조를 따른다
+
+새 FTC(Java) 파일을 만들 때는 반드시 아래 패키지 구조에 맞춰 배치한다. 파일을
+`teamcode/` 루트에 흩뿌리지 않는다. (작년 팀 레포 컨벤션과 동일)
+
+```
+TeamCode/src/main/java/org/firstinspires/ftc/teamcode/
+├── opmodes/            OpMode만 모음 (@TeleOp/@Autonomous 붙은 클래스)
+│   ├── TeleOp/           수동 조종 OpMode
+│   ├── auto/             자율주행 OpMode
+│   └── tests/            하드웨어/기능 테스트용 OpMode
+├── subsystems/         드라이브트레인·팔 등 하드웨어 서브시스템 (FTCLib SubsystemBase)
+├── commands/           동작 단위 Command (FTCLib CommandBase)
+├── localization/       오도메트리·야코비안 등 위치추정/기구학
+├── comm/               외부 PC 통신 (소켓 서버 등)
+└── Utils/              공용 상수·헬퍼
+```
+
+원칙:
+- **OpMode는 반드시 `opmodes/` 하위**에 두고, 종류별(TeleOp/auto/tests)로 분류한다.
+- 로직(subsystem/command/localization)과 진입점(OpMode)을 섞지 않는다.
+- 새 폴더가 필요하면 이 구조와 일관되게 소문자 패키지명으로 추가한다.
+- 파일을 옮기면 `package` 선언과 import를 반드시 함께 수정하고 빌드로 검증한다.
