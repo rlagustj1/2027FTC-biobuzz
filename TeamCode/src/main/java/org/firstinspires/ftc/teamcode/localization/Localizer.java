@@ -27,16 +27,18 @@ import org.firstinspires.ftc.robotcore.external.navigation.YawPitchRollAngles;
  */
 public class Localizer {
 
-    // === 실측 필요 파라미터 (CLAUDE.md 규칙 1 — placeholder) ===================
-    // TODO: 실측 필요 — 오도휠 반지름 (예: 지름 48mm → 0.024m)
+    // === goBILDA 오도메트리 팟 기준값 (일부 실측 권장) ==========================
+    // goBILDA Odometry Pod: 휠 지름 48mm → 반지름 0.024m
     private static final double DEAD_WHEEL_RADIUS = 0.024; // m
-    // TODO: 실측 필요 — 오도 엔코더 1회전당 틱수 (예: REV through-bore 8192)
-    private static final double ODO_TICKS_PER_REV = 8192;  // 틱/회전
-    // TODO: 실측 필요 — 데드휠 장착 오프셋 (로봇 중심 기준)
+    // goBILDA 오도팟 내장 엔코더: 2000 틱/회전
+    // TODO: 제품번호 확인 — 3110-0001-0001 계열이면 2000 CPR 맞음. 다르면 교체.
+    private static final double ODO_TICKS_PER_REV = 2000;  // 틱/회전
+    // TODO: 실측 필요 — 데드휠 장착 오프셋 (로봇 중심 기준, 방향검증 후 정밀 측정)
     //   PARALLEL_OFFSET: 전진 휠이 중심에서 Y로 떨어진 거리 (m)
     //   PERP_OFFSET:     스트레이프 휠이 중심에서 X로 떨어진 거리 (m)
-    private static final double PARALLEL_OFFSET = 0.08;    // m
-    private static final double PERP_OFFSET = -0.10;       // m
+    //   ※ 오프셋은 "제자리 회전 검증" 단계에서 실측해 넣을 것 (지금은 임시 0으로 시작)
+    private static final double PARALLEL_OFFSET = 0.0;     // m (임시 — 회전검증 후 실측)
+    private static final double PERP_OFFSET = 0.0;         // m (임시 — 회전검증 후 실측)
 
     // 파생값: 오도휠 1틱당 이동 거리 (m/틱)
     private static final double ODO_M_PER_TICK =
@@ -131,6 +133,20 @@ public class Localizer {
     public double getX() { return xM; }
     public double getY() { return yM; }
     public double getHeading() { return headingRad; }
+
+    // === 디버그용 원시값 접근자 (방향/부호 검증에 사용) =========================
+    /** parallel 데드휠 현재 엔코더 틱 (원시). */
+    public int getParallelTicks() { return parallelEncoder.getCurrentPosition(); }
+    /** perpendicular 데드휠 현재 엔코더 틱 (원시). */
+    public int getPerpTicks() { return perpEncoder.getCurrentPosition(); }
+    /** IMU 원시 heading (rad). */
+    public double getImuHeading() { return readImuHeading(); }
+
+    /** 좌표를 (0,0,현재heading)으로 리셋. 검증 시작 전 호출. */
+    public void resetPose() {
+        xM = 0; yM = 0;
+        resetEncoderBaseline();
+    }
 
     /** 텔레메트리/디버그용 문자열. */
     public String debugString() {
