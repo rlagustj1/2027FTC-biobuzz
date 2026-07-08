@@ -86,6 +86,13 @@ Brooks[1]는 이를 **계층형 제어(subsumption architecture)** 로 재구성
 
 ## Ⅳ. 시스템 설계 (3계층 아키텍처)
 
+![다중 프로세싱 계층 제어 아키텍처](../pc/ai/architecture_diagram.png)
+
+*그림 1. 3계층 다중 프로세싱 아키텍처. 오른쪽 축은 지연–정밀도 트레이드오프(위로 갈수록
+느리지만 똑똑, 아래로 갈수록 빠르고 정확)를 나타낸다. 상위→하위로 갈수록 주기가 빨라지고
+(0.2→30→20→최대 1000 Hz) 출력이 서술적 전략에서 결정적 모터출력으로 구체화된다.
+그림 생성 코드: `pc/ai/architecture_diagram.py`*
+
 ```
 [외부 PC]  상위 VLM Planner  (~0.2Hz)  "무엇을 할지"  Ollama(llava)  → Goal(semantic)
            중위 Perception   (~30Hz)   "어디 있는지"  YOLO/OpenCV    → Detections(좌표)
@@ -93,6 +100,12 @@ Brooks[1]는 이를 **계층형 제어(subsumption architecture)** 로 재구성
                       │  TCP+JSON (goto ▼ / pose ▲)
 [Control Hub] 실시간 제어 (50~1000Hz)  오도메트리+경로추종+모터출력  (수식만, 모델X)
 ```
+
+**그림 해설**: 데이터는 두 방향으로 흐른다. **하향(명령)**: VLM이 서술적 `Goal`을 내면,
+인식이 그것을 좌표(`Detections`)로 뒷받침하고, 오케스트레이터가 최종 `goto(x,y,h)`로 구체화해
+로봇에 보낸다. **상향(상태)**: 로봇은 `pose`(위치·heading)와 통신 왕복지연(`RTT`)을 계속
+스트리밍한다. 상위 세 계층은 외부 PC에서 각자 다른 주기의 스레드로 돌고, 실시간 제어만
+로봇 온보드에서 고속으로 돈다 — 이 물리적 분리가 지연 격리(H1)의 근거다.
 
 ### 4.1 계층별 책임과 코드 매핑
 - **상위 (전략)** `planner.py` — `Goal(kind, target_label, reason)` 반환. VLM이 장면을 해석해
@@ -204,6 +217,7 @@ planner(VLM) 지연을 0→2 s로 키워도 하위 두 계층의 실측 주기�
 
 ## 부록 B. 사용 코드
 - 오케스트레이터(3계층 구동): `pc/ai/orchestrator.py`
+- 아키텍처 그림(그림 1): `pc/ai/architecture_diagram.py` · `pc/ai/architecture_diagram.png`
 - 계측 실험(H1·H2): `pc/ai/timing_experiment.py` · 그래프 `pc/ai/timing_experiment_result.png`
 - 인식(중위): `pc/ai/perception.py` (`MockPerception`, `YoloPerception` 자리)
 - 전략(상위): `pc/ai/planner.py` (`MockPlanner`, `OllamaVLMPlanner`)
