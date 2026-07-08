@@ -29,7 +29,9 @@ public class DashboardDriveOpMode extends LinearOpMode {
     private static final double POS_TOLERANCE = 0.03;
 
     // 회전 P 게인 (TurnTest 실기 검증값 — SIGN, 방향고정, 근접구간 무강제 로직 포함)
-    private static final double SIGN = +1.0;
+    // SIGN 실기 확정: -1 (하드웨어상 +w=CW라 부호 반대). +1이면 heading이 목표에서 발산 → -176 정체.
+    // TurnTest·GoToPointTest와 부호 통일함.
+    private static final double SIGN = -1.0;
     private static final double KP_HEADING = 0.6;
     private static final double MAX_TURN = 0.45;
     private static final double MIN_TURN_POWER = 0.15;
@@ -103,46 +105,59 @@ public class DashboardDriveOpMode extends LinearOpMode {
                     posErr = Math.hypot(exField, eyField);
                     double absHeadingErr = Math.abs(eHeading);
 
-                    // --- 회전 제어 (TurnTest 검증 로직: 방향고정 + 근접구간 무강제) ---
-                    // 버그 수정: 매 루프 재평가하면 ±180 경계 근처에서 IMU노이즈로 dirLock이
-                    // 계속 뒤집혀 방향을 못 정함(버징). "아직 미정(0)일 때 한 번만" 고정.
+                    // --- 회전 제어: TurnTest(단독 실기검증 완료) 로직과 "동일"하게 맞춤 ---
+                    // ±180 경계 노이즈로 좌우가 뒤집히는 걸 막기 위해, 오차가 큰 동안만(>DIR_LOCK_DEG)
+                    // 회전 방향을 한 번 고정한다. "아직 미정(0)일 때 한 번만" 고정.
                     if (dirLock == 0.0 && Math.toDegrees(absHeadingErr) > DIR_LOCK_DEG) {
                         dirLock = Math.signum(eHeading);
                     }
+                    // ★버그 수정 핵심: 허용오차 안에 "들어오는 즉시" dirLock 해제.
+                    // (이전 버전은 settle 300ms 버틴 뒤에만 해제했음 → 그 사이 오버슈트하면
+                    //  dirLock*absErr 강제부호가 실제오차 반대로 계속 밀어붙여 목표를 못 잡고
+                    //  근처에서 헌팅/정체(‑176° 증상). TurnTest는 도달 즉시 풀어서 자연감쇠함.)
+                    if (absHeadingErr < HEADING_TOLERANCE) {
+                        dirLock = 0.0;
+                    }
 
                     if (phase.equals("TURN")) {
+                        // w 계산 — TurnTest와 완전히 동일: 방향 고정 시 부호 강제, 크기는 오차 비례.
+                        double signedErr = (dirLock != 0.0) ? dirLock * absHeadingErr : eHeading;
+                        w = clamp(SIGN * KP_HEADING * signedErr, -MAX_TURN, MAX_TURN);
+                        // 목표 근처(≤RESUME_THRESHOLD)에선 최소출력 강제 안 함 → 자연 감쇠(오버슈트 방지).
+                        // 그 밖에서만 정지마찰 데드존 보상용 최소출력 보장. (TurnTest와 동일 조건)
+                        if (absHeadingErr <= RESUME_THRESHOLD) {
+                            // 그대로 둠 (min power 미적용)
+                        } else if (Math.abs(w) < MIN_TURN_POWER) {
+                            w = Math.copySign(MIN_TURN_POWER, w);
+                        }
+
+                        // 전환 게이트: 허용오차 안에 SETTLE_MS 동안 "계속" 머물러야 MOVE로 전환.
+                        // (순간적으로 스친 뒤 불안정한 heading으로 이동 시작하는 것을 막음)
                         if (absHeadingErr < HEADING_TOLERANCE) {
-                            // 허용오차 안에 들어옴 — 정착 타이머 시작(또는 계속 흐르게 둠)
                             if (settleStartMs < 0) settleStartMs = System.currentTimeMillis();
                             if (System.currentTimeMillis() - settleStartMs >= SETTLE_MS) {
-                                // SETTLE_MS 동안 계속 안정적이었음 -> 진짜 전환
                                 phase = "MOVE";
                                 headingLatched = true;
                                 dirLock = 0.0;
+                                settleStartMs = -1;
                             }
-                            // 정착 대기 중에도 미세 보정은 계속 (완전히 끄지 않음)
-                            double signedErr = (dirLock != 0.0) ? dirLock * absHeadingErr : eHeading;
-                            w = clamp(SIGN * KP_HEADING * signedErr, -MAX_TURN, MAX_TURN);
                         } else {
-                            // 허용오차 밖으로 나감 -> 정착 타이머 리셋, 계속 회전
                             settleStartMs = -1;
-                            double signedErr = (dirLock != 0.0) ? dirLock * absHeadingErr : eHeading;
-                            w = clamp(SIGN * KP_HEADING * signedErr, -MAX_TURN, MAX_TURN);
-                            if (Math.abs(w) < MIN_TURN_POWER) {
-                                w = Math.copySign(MIN_TURN_POWER, w);
-                            }
                         }
                     } else {
+                        // MOVE 단계: 위치 이동, heading은 래치로 유지하고 크게 틀어질 때만 재보정.
                         if (headingLatched && absHeadingErr > RESUME_THRESHOLD) {
-                            headingLatched = false;
+                            headingLatched = false;   // 많이 틀어짐 → heading 재보정 시작
+                        } else if (!headingLatched && absHeadingErr < HEADING_TOLERANCE) {
+                            headingLatched = true;    // 다시 정렬됨 → 재래치(위치-회전 커플링 축소)
                         }
-                        // MOVE 단계: 위치 이동, heading은 그대로 유지(작은 보정만)
                         boolean posReached = posErr < POS_TOLERANCE;
                         if (!posReached) {
                             vx = clamp(KP_POS * exLocal, -MAX_DRIVE, MAX_DRIVE);
                             vy = clamp(KP_POS * eyLocal, -MAX_DRIVE, MAX_DRIVE);
                         }
-                        // heading이 이동 중 틀어지면 살짝만 보정 (래치 안 걸린 경우만)
+                        // heading이 이동 중 틀어지면 살짝만 보정 (래치 안 걸린 경우만).
+                        // 실제 부호(eHeading)로 보정하므로 오버슈트해도 스스로 되돌아옴.
                         if (!headingLatched) {
                             w = clamp(SIGN * KP_HEADING * eHeading, -MAX_TURN * 0.5, MAX_TURN * 0.5);
                         }
@@ -157,6 +172,13 @@ public class DashboardDriveOpMode extends LinearOpMode {
                 if (hasTarget) {
                     telemetry.addData("목표", "X=%.2f Y=%.2f θ=%.0f°", tx, ty, Math.toDegrees(tHeading));
                     telemetry.addData("남은거리", "%.3f m", posErr);
+                    // 라이브 디버깅용: 회전 상태를 실시간으로 관찰 (스크린샷 사후분석보다 빠름)
+                    telemetry.addData("heading오차(°)", "%.1f", Math.toDegrees(eHeading));
+                    telemetry.addData("w 출력", "%.2f", w);
+                    telemetry.addData("dirLock", "%.0f", dirLock);
+                    long settleMs = (settleStartMs < 0) ? 0 : (System.currentTimeMillis() - settleStartMs);
+                    telemetry.addData("settle(ms)", "%d / %d", settleMs, SETTLE_MS);
+                    telemetry.addData("latch", headingLatched);
                 } else {
                     telemetry.addLine("목표 대기중 (대시보드 클릭)");
                 }

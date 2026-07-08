@@ -1,0 +1,58 @@
+{
+  "version": "2.0.0",
+  "options": {
+    "env": {
+      "JAVA_HOME": "C:\\Program Files\\Android\\Android Studio\\jbr"
+    }
+  },
+  "tasks": [
+    {
+      "label": "FTC: USB 배포 (installDebug)",
+      "type": "shell",
+      "command": ".\\gradlew.bat",
+      "args": [":TeamCode:installDebug"],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": [],
+      "detail": "USB로 로봇에 빌드+설치. Ctrl+Shift+B 기본 실행."
+    },
+    {
+      "label": "FTC: 빌드만 (assembleDebug)",
+      "type": "shell",
+      "command": ".\\gradlew.bat",
+      "args": [":TeamCode:assembleDebug"],
+      "group": "build",
+      "problemMatcher": [],
+      "detail": "APK만 빌드 (로봇 없이 문법/컴파일 확인용)."
+    },
+    {
+      "label": "FTC: 무선 배포 (자동 - wifi_deploy.ps1)",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-ExecutionPolicy", "Bypass", "-File", ".\\wifi_deploy.ps1"],
+      "problemMatcher": [],
+      "detail": "FTC WiFi 전환→adb접속→설치→시계보정→집WiFi 자동복귀. 미리 assembleDebug 필요."
+    },
+    {
+      "label": "FTC: 무선 배포 (수동 - 이미 FTC WiFi일 때)",
+      "type": "shell",
+      "command": "& \"$env:LOCALAPPDATA\\Android\\Sdk\\platform-tools\\adb.exe\" connect 192.168.43.1:5555; .\\gradlew.bat :TeamCode:installDebug",
+      "options": { "env": { "JAVA_HOME": "C:\\Program Files\\Android\\Android Studio\\jbr" } },
+      "problemMatcher": [],
+      "detail": "PC가 이미 FTC-be8o WiFi에 붙어 있을 때: 무선 adb 접속 후 배포."
+    },
+    {
+      "label": "FTC: RC 앱 실행",
+      "type": "shell",
+      "command": "& \"$env:LOCALAPPDATA\\Android\\Sdk\\platform-tools\\adb.exe\" shell am start -n com.qualcomm.ftcrobotcontroller/org.firstinspires.ftc.robotcontroller.internal.FtcRobotControllerActivity",
+      "problemMatcher": [],
+      "detail": "재설치 후 RC 앱이 자동 실행 안 될 때."
+    },
+    {
+      "label": "FTC: 대시보드 포워딩 (adb forward 9999)",
+      "type": "shell",
+      "command": "& \"$env:LOCALAPPDATA\\Android\\Sdk\\platform-tools\\adb.exe\" forward tcp:9999 tcp:9999; & \"$env:LOCALAPPDATA\\Android\\Sdk\\platform-tools\\adb.exe\" forward --list",
+      "problemMatcher": [],
+      "detail": "USB로 대시보드 쓸 때 포트포워딩."
+    }
+  ]
+}
