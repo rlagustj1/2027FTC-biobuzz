@@ -72,7 +72,8 @@ public class TurnTest extends LinearOpMode {
 
             // 방향 고정: 오차가 DIR_LOCK_DEG를 넘게 벗어나면 그 시점의 부호로 방향을 고정.
             // 경계(±180) 근처 노이즈로 좌우가 뒤집히는 걸 막는다.
-            if (Math.toDegrees(absErr) > DIR_LOCK_DEG) {
+            // 버그 수정: "아직 미정(0)일 때 한 번만" 고정 (매 루프 재평가하면 노이즈로 계속 뒤집힘).
+            if (dirLock == 0.0 && Math.toDegrees(absErr) > DIR_LOCK_DEG) {
                 dirLock = Math.signum(eHeading);
             }
 
