@@ -23,13 +23,19 @@ import org.firstinspires.ftc.teamcode.subsystems.DriveSubsystem;
 @TeleOp(name = "Dashboard Drive", group = "auto")
 public class DashboardDriveOpMode extends LinearOpMode {
 
-    // P 게인 (GoToPointTest와 동일 검증값)
+    // 위치 P 게인 (GoToPointTest 검증값)
     private static final double KP_POS = 1.2;
-    private static final double KP_HEADING = 1.5;
     private static final double MAX_DRIVE = 0.5;
-    private static final double MAX_TURN = 0.4;
     private static final double POS_TOLERANCE = 0.03;
-    private static final double HEADING_TOLERANCE = Math.toRadians(3);
+
+    // 회전 P 게인 (TurnTest 실기 검증값 — SIGN, 방향고정, 근접구간 무강제 로직 포함)
+    private static final double SIGN = +1.0;
+    private static final double KP_HEADING = 0.6;
+    private static final double MAX_TURN = 0.45;
+    private static final double MIN_TURN_POWER = 0.15;
+    private static final double HEADING_TOLERANCE = Math.toRadians(8);
+    private static final double RESUME_THRESHOLD = Math.toRadians(14);
+    private static final double DIR_LOCK_DEG = 160.0;
 
     @Override
     public void runOpMode() {
@@ -51,6 +57,10 @@ public class DashboardDriveOpMode extends LinearOpMode {
         // 목표 (null이면 정지 대기). 대시보드 goto 명령으로 갱신.
         boolean hasTarget = false;
         double tx = 0, ty = 0, tHeading = 0;
+
+        // 회전 제어 상태 (TurnTest와 동일한 래치/방향고정 로직)
+        boolean headingLatched = false;
+        double dirLock = 0.0;
 
         try {
             while (opModeIsActive()) {
@@ -77,12 +87,31 @@ public class DashboardDriveOpMode extends LinearOpMode {
                     double eyLocal = exField * s + eyField * c;
                     eHeading = normalizeAngle(tHeading - th);
                     posErr = Math.hypot(exField, eyField);
+                    double absHeadingErr = Math.abs(eHeading);
 
-                    boolean reached = posErr < POS_TOLERANCE && Math.abs(eHeading) < HEADING_TOLERANCE;
-                    if (!reached) {
+                    // --- 위치 제어 ---
+                    boolean posReached = posErr < POS_TOLERANCE;
+                    if (!posReached) {
                         vx = clamp(KP_POS * exLocal, -MAX_DRIVE, MAX_DRIVE);
                         vy = clamp(KP_POS * eyLocal, -MAX_DRIVE, MAX_DRIVE);
-                        w = clamp(-KP_HEADING * eHeading, -MAX_TURN, MAX_TURN); // 검증된 부호
+                    }
+
+                    // --- 회전 제어 (TurnTest 검증 로직: 방향고정 + 래치 + 근접구간 무강제) ---
+                    if (Math.toDegrees(absHeadingErr) > DIR_LOCK_DEG) {
+                        dirLock = Math.signum(eHeading);
+                    }
+                    if (!headingLatched && absHeadingErr < HEADING_TOLERANCE) {
+                        headingLatched = true;
+                        dirLock = 0.0;
+                    } else if (headingLatched && absHeadingErr > RESUME_THRESHOLD) {
+                        headingLatched = false;
+                    }
+                    if (!headingLatched) {
+                        double signedErr = (dirLock != 0.0) ? dirLock * absHeadingErr : eHeading;
+                        w = clamp(SIGN * KP_HEADING * signedErr, -MAX_TURN, MAX_TURN);
+                        if (absHeadingErr > RESUME_THRESHOLD && Math.abs(w) < MIN_TURN_POWER) {
+                            w = Math.copySign(MIN_TURN_POWER, w);
+                        }
                     }
                 }
 
