@@ -213,9 +213,13 @@ planner(VLM) 지연을 0→2 s로 키워도 하위 두 계층의 실측 주기�
 ## 부록 A. 현재 구현 상태 / 다음 단계
 - **완료**: 3계층 인터페이스 + Mock으로 아키텍처 골격, `--sim`으로 집에서 구동 가능.
 - **완료**: 계측 하니스(`timing_experiment.py`)로 H1·H2 실측 입증.
-- **다음**: ① `MockPerception`→YOLO(ultralytics)/OpenCV 색검출 ②
-  `MockPlanner`→`OllamaVLMPlanner`(`ollama pull llava`) ③ 카메라 프레임 통합(로봇캠/PC웹캠)
-  ④ H3(RTT)·H5(열화) 실측.
+- **완료**: 하위 실행단(로봇 goto = 위치+회전 좌표 이동)을 실기로 검증 완료. 즉 오케스트레이터가
+  내리는 `goto(x,y,h)`를 로봇이 정확히 수행함이 확인되어, **3계층 → 실로봇 end-to-end 구동의
+  마지막 실행 고리가 완성**되었다. (규명 과정은 자코비안 보고서 Ⅲ.3.4 참조 — 메카넘 롤러 구성
+  포함 5겹 부정합을 온보드 로깅으로 규명)
+- **다음**: ① 오케스트레이터를 실로봇에 연결(Mock 인식으로도 자율 이동 데모 가능) ②
+  `MockPerception`→YOLO(ultralytics)/OpenCV 색검출 ③ `MockPlanner`→`OllamaVLMPlanner`
+  (`ollama pull llava`) ④ 카메라 프레임 통합 ⑤ H3(RTT)·H5(열화) 실측.
 
 ## 부록 B. 사용 코드
 - 오케스트레이터(3계층 구동): `pc/ai/orchestrator.py`
