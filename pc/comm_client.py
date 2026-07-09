@@ -92,10 +92,12 @@ class RobotLink:
 
     def close(self):
         self.running = False
-        try:
-            self.sock.close()
-        except OSError:
-            pass
+        # sock이 None(한 번도 연결 안 됨)이어도 안전하게 종료
+        if self.sock is not None:
+            try:
+                self.sock.close()
+            except OSError:
+                pass
 
 
 def pose_printer(link):

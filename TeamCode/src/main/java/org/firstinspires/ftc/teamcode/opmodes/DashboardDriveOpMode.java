@@ -37,6 +37,9 @@ public class DashboardDriveOpMode extends LinearOpMode {
     private static final double MIN_TURN_POWER = 0.15;
     private static final double HEADING_TOLERANCE = Math.toRadians(8);
     private static final double RESUME_THRESHOLD = Math.toRadians(14);
+    // 커플링 방지 게이트: heading 오차가 이 값보다 크면(큰 회전 중) 위치이동을 잠깐 끔.
+    // 회전 먼저 얼추 맞춘 뒤 이동+회전 동시 → 회전 중 arc 발산 방지.
+    private static final double MOVE_HEADING_GATE = Math.toRadians(25);
     private static final double DIR_LOCK_DEG = 160.0;
 
     @Override
@@ -60,19 +63,8 @@ public class DashboardDriveOpMode extends LinearOpMode {
         boolean hasTarget = false;
         double tx = 0, ty = 0, tHeading = 0;
 
-        // 회전 제어 상태 (TurnTest와 동일한 래치/방향고정 로직)
+        // heading 래치(이력현상): 목표 근처 도달 시 걸어 진동(버징) 방지. TurnTest와 동일 개념.
         boolean headingLatched = false;
-        double dirLock = 0.0;
-
-        // 실기 검증: 위치+회전 동시제어 시 위치오차의 로컬프레임 변환이 회전중인 heading을
-        // 계속 참조해 나선형 궤적으로 발산함. 2단계(회전 먼저→위치 이동)로 분리해 해결.
-        // PHASE_TURN: 제자리 회전만. PHASE_MOVE: heading 고정하고 위치만 이동.
-        String phase = "TURN";
-        // 실기 검증: IMU 노이즈로 허용오차 안에 "순간적으로만" 스치는 순간이 있어 그걸로
-        // 바로 MOVE 전환되면 아직 안 안정된 heading으로 이동 시작 → 궤적 발산.
-        // 일정 시간(SETTLE_MS) 동안 계속 허용오차 안에 머물러야 진짜 전환.
-        long settleStartMs = -1;
-        final long SETTLE_MS = 300;
 
         try {
             while (opModeIsActive()) {
@@ -82,15 +74,12 @@ public class DashboardDriveOpMode extends LinearOpMode {
                 // --- pose 스트리밍 (대시보드 표시용) ---
                 server.setPose(x, y, th, 0.0, System.currentTimeMillis());
 
-                // --- 대시보드가 보낸 최신 목표 확인 (새 목표 오면 회전 단계부터 재시작) ---
+                // --- 대시보드가 보낸 최신 목표 확인 (새 목표 오면 래치 해제) ---
                 RobotCommServer.Command cmd = server.getLatestCommand();
                 if (cmd != null && (!hasTarget || cmd.x != tx || cmd.y != ty || cmd.h != tHeading)) {
                     tx = cmd.x; ty = cmd.y; tHeading = cmd.h;
                     hasTarget = true;
-                    phase = "TURN";
                     headingLatched = false;
-                    dirLock = 0.0;
-                    settleStartMs = -1;
                 }
 
                 double vx = 0, vy = 0, w = 0;
@@ -105,61 +94,34 @@ public class DashboardDriveOpMode extends LinearOpMode {
                     posErr = Math.hypot(exField, eyField);
                     double absHeadingErr = Math.abs(eHeading);
 
-                    // --- 회전 제어: TurnTest(단독 실기검증 완료) 로직과 "동일"하게 맞춤 ---
-                    // ±180 경계 노이즈로 좌우가 뒤집히는 걸 막기 위해, 오차가 큰 동안만(>DIR_LOCK_DEG)
-                    // 회전 방향을 한 번 고정한다. "아직 미정(0)일 때 한 번만" 고정.
-                    if (dirLock == 0.0 && Math.toDegrees(absHeadingErr) > DIR_LOCK_DEG) {
-                        dirLock = Math.signum(eHeading);
-                    }
-                    // ★버그 수정 핵심: 허용오차 안에 "들어오는 즉시" dirLock 해제.
-                    // (이전 버전은 settle 300ms 버틴 뒤에만 해제했음 → 그 사이 오버슈트하면
-                    //  dirLock*absErr 강제부호가 실제오차 반대로 계속 밀어붙여 목표를 못 잡고
-                    //  근처에서 헌팅/정체(‑176° 증상). TurnTest는 도달 즉시 풀어서 자연감쇠함.)
-                    if (absHeadingErr < HEADING_TOLERANCE) {
-                        dirLock = 0.0;
+                    // ================= 단순 동시제어 (위치 X·Y·heading 한꺼번에) =================
+                    // 부호(SIGN=-1)와 오도 오프셋을 실기로 잡았으므로, 2단계/dirLock/settle 같은
+                    // 우회 로직을 걷어내고 GoToPointTest처럼 셋을 동시에 P제어한다. 메카넘은
+                    // 홀로노믹이라 이동+회전이 동시에 가능하고, 매 루프 현재 heading으로 좌표변환하니
+                    // 회전 중에도 위치명령이 알아서 갱신된다. (X만 되고 Y/heading 깨지던 원인 = 우회로직)
+
+                    // --- 위치 제어: 로컬프레임 오차 → vx, vy ---
+                    // 커플링 방지: heading이 많이 틀어져 있으면(큰 회전 중) 이동을 잠깐 끈다.
+                    // 회전 중 오도 드리프트를 위치제어가 쫓아가며 곡선(arc) 그리던 것을 막음.
+                    // heading이 게이트(±MOVE_GATE) 안으로 들어오면 그때부터 이동+회전 동시.
+                    boolean headingAligned = absHeadingErr < MOVE_HEADING_GATE;
+                    if (posErr >= POS_TOLERANCE && headingAligned) {
+                        vx = clamp(KP_POS * exLocal, -MAX_DRIVE, MAX_DRIVE);
+                        vy = clamp(KP_POS * eyLocal, -MAX_DRIVE, MAX_DRIVE);
                     }
 
-                    if (phase.equals("TURN")) {
-                        // w 계산 — TurnTest와 완전히 동일: 방향 고정 시 부호 강제, 크기는 오차 비례.
-                        double signedErr = (dirLock != 0.0) ? dirLock * absHeadingErr : eHeading;
-                        w = clamp(SIGN * KP_HEADING * signedErr, -MAX_TURN, MAX_TURN);
-                        // 목표 근처(≤RESUME_THRESHOLD)에선 최소출력 강제 안 함 → 자연 감쇠(오버슈트 방지).
-                        // 그 밖에서만 정지마찰 데드존 보상용 최소출력 보장. (TurnTest와 동일 조건)
-                        if (absHeadingErr <= RESUME_THRESHOLD) {
-                            // 그대로 둠 (min power 미적용)
-                        } else if (Math.abs(w) < MIN_TURN_POWER) {
+                    // --- heading 제어: 래치로 목표 근처 진동(버징) 방지 (TurnTest와 동일 개념) ---
+                    if (headingLatched && absHeadingErr > RESUME_THRESHOLD) {
+                        headingLatched = false;                 // 많이 틀어짐 → 재보정 시작
+                    } else if (!headingLatched && absHeadingErr < HEADING_TOLERANCE) {
+                        headingLatched = true;                  // 도달 → 래치(진동 방지)
+                    }
+                    if (!headingLatched) {
+                        w = clamp(SIGN * KP_HEADING * eHeading, -MAX_TURN, MAX_TURN);
+                        // 목표 근처(≤RESUME)에선 최소출력 강제 안 함(오버슈트/버징 방지),
+                        // 멀 때만 정지마찰 보상 최소출력. (TurnTest와 동일)
+                        if (absHeadingErr > RESUME_THRESHOLD && Math.abs(w) < MIN_TURN_POWER) {
                             w = Math.copySign(MIN_TURN_POWER, w);
-                        }
-
-                        // 전환 게이트: 허용오차 안에 SETTLE_MS 동안 "계속" 머물러야 MOVE로 전환.
-                        // (순간적으로 스친 뒤 불안정한 heading으로 이동 시작하는 것을 막음)
-                        if (absHeadingErr < HEADING_TOLERANCE) {
-                            if (settleStartMs < 0) settleStartMs = System.currentTimeMillis();
-                            if (System.currentTimeMillis() - settleStartMs >= SETTLE_MS) {
-                                phase = "MOVE";
-                                headingLatched = true;
-                                dirLock = 0.0;
-                                settleStartMs = -1;
-                            }
-                        } else {
-                            settleStartMs = -1;
-                        }
-                    } else {
-                        // MOVE 단계: 위치 이동, heading은 래치로 유지하고 크게 틀어질 때만 재보정.
-                        if (headingLatched && absHeadingErr > RESUME_THRESHOLD) {
-                            headingLatched = false;   // 많이 틀어짐 → heading 재보정 시작
-                        } else if (!headingLatched && absHeadingErr < HEADING_TOLERANCE) {
-                            headingLatched = true;    // 다시 정렬됨 → 재래치(위치-회전 커플링 축소)
-                        }
-                        boolean posReached = posErr < POS_TOLERANCE;
-                        if (!posReached) {
-                            vx = clamp(KP_POS * exLocal, -MAX_DRIVE, MAX_DRIVE);
-                            vy = clamp(KP_POS * eyLocal, -MAX_DRIVE, MAX_DRIVE);
-                        }
-                        // heading이 이동 중 틀어지면 살짝만 보정 (래치 안 걸린 경우만).
-                        // 실제 부호(eHeading)로 보정하므로 오버슈트해도 스스로 되돌아옴.
-                        if (!headingLatched) {
-                            w = clamp(SIGN * KP_HEADING * eHeading, -MAX_TURN * 0.5, MAX_TURN * 0.5);
                         }
                     }
                 }
@@ -167,17 +129,14 @@ public class DashboardDriveOpMode extends LinearOpMode {
                 drive.driveRobotRelative(vx, vy, w);
 
                 telemetry.addData("client", server.isClientConnected() ? "연결됨" : "대기");
-                telemetry.addData("phase", phase);
+                telemetry.addData("제어", "단순 동시제어 (X·Y·heading)");
                 telemetry.addData("pose", "X=%.3f Y=%.3f θ=%.1f°", x, y, Math.toDegrees(th));
                 if (hasTarget) {
                     telemetry.addData("목표", "X=%.2f Y=%.2f θ=%.0f°", tx, ty, Math.toDegrees(tHeading));
                     telemetry.addData("남은거리", "%.3f m", posErr);
-                    // 라이브 디버깅용: 회전 상태를 실시간으로 관찰 (스크린샷 사후분석보다 빠름)
+                    // 라이브 디버깅용 실시간 값
                     telemetry.addData("heading오차(°)", "%.1f", Math.toDegrees(eHeading));
-                    telemetry.addData("w 출력", "%.2f", w);
-                    telemetry.addData("dirLock", "%.0f", dirLock);
-                    long settleMs = (settleStartMs < 0) ? 0 : (System.currentTimeMillis() - settleStartMs);
-                    telemetry.addData("settle(ms)", "%d / %d", settleMs, SETTLE_MS);
+                    telemetry.addData("출력", "vx=%.2f vy=%.2f w=%.2f", vx, vy, w);
                     telemetry.addData("latch", headingLatched);
                 } else {
                     telemetry.addLine("목표 대기중 (대시보드 클릭)");

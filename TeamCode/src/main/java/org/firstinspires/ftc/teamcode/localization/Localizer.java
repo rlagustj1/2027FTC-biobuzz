@@ -37,12 +37,12 @@ public class Localizer {
     // 실측: 앞으로 미는데 X가 음수로 나옴 → parallel 부호 뒤집음(-1).
     private static final double PARALLEL_DIR = -1.0;
     private static final double PERP_DIR = +1.0;           // 좌측→Y+ 정상이라 유지
-    // TODO: 실측 필요 — 데드휠 장착 오프셋 (로봇 중심 기준, 방향검증 후 정밀 측정)
-    //   PARALLEL_OFFSET: 전진 휠이 중심에서 Y로 떨어진 거리 (m)
-    //   PERP_OFFSET:     스트레이프 휠이 중심에서 X로 떨어진 거리 (m)
-    //   ※ 오프셋은 "제자리 회전 검증" 단계에서 실측해 넣을 것 (지금은 임시 0으로 시작)
-    private static final double PARALLEL_OFFSET = 0.0;     // m (임시 — 회전검증 후 실측)
-    private static final double PERP_OFFSET = 0.0;         // m (임시 — 회전검증 후 실측)
+    // 실측 완료 (2026-07-09, OdoOffsetCalibration OpMode로 제자리 5바퀴+ 회전 측정):
+    //   데드휠이 회전중심에서 ~21cm 떨어져 있어 제자리 회전 시 phantom 병진이 생기던 것을 보정.
+    //   PARALLEL_OFFSET: 전진 휠이 중심에서 Y로 떨어진 거리, PERP_OFFSET: 스트레이프 휠의 X 오프셋.
+    //   재측정하려면 OdoOffsetCalibration 다시 실행. (부호 포함 그대로 사용 — 캘리브값 = Σdpar/Σdθ)
+    private static final double PARALLEL_OFFSET = 0.2226;  // m (실측)
+    private static final double PERP_OFFSET = -0.2095;     // m (실측)
 
     // 파생값: 오도휠 1틱당 이동 거리 (m/틱)
     private static final double ODO_M_PER_TICK =
@@ -60,6 +60,13 @@ public class Localizer {
     private double prevHeadingRad = 0.0;
     private int prevParallelTicks = 0;
     private int prevPerpTicks = 0;
+
+    // === 오프셋 캘리브레이션용 누적값 =========================================
+    // 제자리 회전 시: dPar = PARALLEL_OFFSET * dHeading (병진분 0). 이를 누적해
+    //   PARALLEL_OFFSET = Σ dPar / Σ dHeading 로 역산한다. perp도 동일.
+    private double cumRawParallel = 0.0;   // Σ dPar (m, 회전분 미보정 원시 병진)
+    private double cumRawPerp = 0.0;       // Σ dPerp (m)
+    private double cumHeadingSigned = 0.0; // Σ dHeading (rad, 부호 유지 연속각)
 
     /**
      * @param hardwareMap       OpMode의 hardwareMap
@@ -86,6 +93,21 @@ public class Localizer {
         prevParallelTicks = parallelEncoder.getCurrentPosition();
         prevPerpTicks = perpEncoder.getCurrentPosition();
         prevHeadingRad = readImuHeading();
+        cumRawParallel = 0.0;
+        cumRawPerp = 0.0;
+        cumHeadingSigned = 0.0;
+    }
+
+    // === 오프셋 캘리브레이션 접근자 ===========================================
+    /** 제자리 회전으로 누적한 총 heading 변화 (rad, 부호 연속). */
+    public double getCumHeading() { return cumHeadingSigned; }
+    /** 오프셋 역산: PARALLEL_OFFSET = Σ dPar / Σ dHeading (m). 회전 충분히 돌린 뒤 읽을 것. */
+    public double calibParallelOffset() {
+        return Math.abs(cumHeadingSigned) < 1e-6 ? 0.0 : cumRawParallel / cumHeadingSigned;
+    }
+    /** 오프셋 역산: PERP_OFFSET = Σ dPerp / Σ dHeading (m). */
+    public double calibPerpOffset() {
+        return Math.abs(cumHeadingSigned) < 1e-6 ? 0.0 : cumRawPerp / cumHeadingSigned;
     }
 
     /** IMU에서 절대 heading(rad, +CCW) 읽기. */
@@ -109,6 +131,11 @@ public class Localizer {
         // 틱 변화량 -> 거리 (m), 장착 방향 부호 적용
         double dPar = (parTicks - prevParallelTicks) * ODO_M_PER_TICK * PARALLEL_DIR;
         double dPerp = (perpTicks - prevPerpTicks) * ODO_M_PER_TICK * PERP_DIR;
+
+        // 오프셋 캘리브레이션용 누적 (회전분 보정 전 원시 병진 + 연속 heading)
+        cumRawParallel += dPar;
+        cumRawPerp += dPerp;
+        cumHeadingSigned += dHeading;
 
         // 회전에 의한 데드휠 회전분 보정 -> 순수 로컬 병진 성분
         double localDx = dPar - PARALLEL_OFFSET * dHeading;
@@ -146,9 +173,13 @@ public class Localizer {
     /** IMU 원시 heading (rad). */
     public double getImuHeading() { return readImuHeading(); }
 
-    /** 좌표를 (0,0,현재heading)으로 리셋. 검증 시작 전 호출. */
+    /** 좌표를 (0,0,0)으로 리셋. 검증 시작 전 호출. */
     public void resetPose() {
         xM = 0; yM = 0;
+        // ★중요: heading도 0으로 리셋(IMU yaw 영점). 이게 빠져서 위치는 0인데 heading만 IMU
+        //   절대값이라, 동시제어 시 goto heading=0이 "절대 0도로 돌아라"가 돼 직진이 곡선으로 꼬였음.
+        imu.resetYaw();
+        headingRad = 0.0;
         resetEncoderBaseline();
     }
 
