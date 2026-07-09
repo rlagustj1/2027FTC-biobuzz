@@ -29,9 +29,9 @@ public class DashboardDriveOpMode extends LinearOpMode {
     private static final double POS_TOLERANCE = 0.03;
 
     // 회전 P 게인 (TurnTest 실기 검증값 — SIGN, 방향고정, 근접구간 무강제 로직 포함)
-    // SIGN 실기 확정: -1 (하드웨어상 +w=CW라 부호 반대). +1이면 heading이 목표에서 발산 → -176 정체.
-    // TurnTest·GoToPointTest와 부호 통일함.
-    private static final double SIGN = -1.0;
+    // SIGN 재확정: +1 (드라이브트레인 모터방향·롤러 수정 후 회전 부호가 뒤집힘).
+    // 이전 -1은 틀린 모터방향에 맞춘 보정값이었음. TurnTest·GoToPointTest와 통일.
+    private static final double SIGN = +1.0;
     private static final double KP_HEADING = 0.6;
     private static final double MAX_TURN = 0.45;
     private static final double MIN_TURN_POWER = 0.15;

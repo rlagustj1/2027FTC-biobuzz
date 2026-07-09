@@ -25,12 +25,11 @@ public class GoToPointTest extends LinearOpMode {
     // 회전+이동 동시 목표로 DashboardDriveOpMode와 동일한 제어를 대시보드 없이 검증한다.
     private static final double TARGET_X = 0.3;               // m (전방)
     private static final double TARGET_Y = 0.3;              // m (좌측)
-    // 회전 없이 위치만(홀로노믹 대각선 이동) — orbit/커플링 배제해 순수 위치제어 검증.
-    // 회전이 필요하면 heading을 바꾸되, 이동-회전 커플링(orbit)은 별도 문제.
-    private static final double TARGET_HEADING = Math.toRadians(0);
+    // 통합 검증: 위치+회전 동시 목표 (드라이브트레인 수정 후 커플링 해소됐는지 확인).
+    private static final double TARGET_HEADING = Math.toRadians(90);
 
     // === P 게인 — 진단용으로 속도 낮춤(관성 오버슈트 배제) ======================
-    private static final double SIGN = -1.0;                 // 회전 부호 (실기 확정)
+    private static final double SIGN = +1.0;                 // 회전 부호 (드라이브트레인 방향수정 후 +1로 재확정)
     private static final double KP_POS = 0.9;                // 위치오차(m) → 속도
     private static final double KP_HEADING = 0.6;            // 방향오차(rad) → 회전
     private static final double MAX_DRIVE = 0.25;            // 병진 출력 상한 (느리게 → 슬립/관성↓)

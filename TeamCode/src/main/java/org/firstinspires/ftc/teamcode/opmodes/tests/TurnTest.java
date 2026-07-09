@@ -24,10 +24,9 @@ public class TurnTest extends LinearOpMode {
     // 목표 heading (라디안). 기본 +90도(CCW).
     private static final double TARGET_HEADING = Math.toRadians(90);
 
-    // 회전 제어 부호. 실기 확정: +1이면 목표 반대로 돌아 한 바퀴 빙 돈 뒤 래치로 얻어걸림
-    // (가짜 도달) → 하드웨어상 +w가 CW를 만들어 부호가 반대였음. GoToPointTest(-KP)와 일치하게
-    // -1로 확정. 이게 DashboardDriveOpMode의 heading -176 발산의 근본 원인이었음.
-    private static final double SIGN = -1.0;
+    // 회전 제어 부호. 드라이브트레인 모터방향·메카넘 롤러 수정 후 회전 부호가 뒤집혀 +1로 재확정.
+    // (이전 -1은 틀린 모터방향에 맞춘 보정값이었음)
+    private static final double SIGN = +1.0;
 
     // 실기 검증: 게인을 낮춰도 목표 근처에서 진동 지속 → 정지마찰(static friction) 데드존이
     // 원인으로 판단. 오차가 작아지면 출력도 작아지는데, 그 출력이 모터를 움직이기엔 부족해서
