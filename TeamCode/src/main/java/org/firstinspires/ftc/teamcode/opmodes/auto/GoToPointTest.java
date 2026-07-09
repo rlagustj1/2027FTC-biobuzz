@@ -6,6 +6,9 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import org.firstinspires.ftc.teamcode.localization.Localizer;
 import org.firstinspires.ftc.teamcode.subsystems.DriveSubsystem;
 
+import java.io.File;
+import java.io.FileWriter;
+
 /**
  * 경로추종 검증용: 목표 좌표 (x, y, heading)까지 P제어로 이동.
  * sim/odometry_ik_sim.py 의 path_follow_control 을 실물로 이식.
@@ -26,12 +29,12 @@ public class GoToPointTest extends LinearOpMode {
     // 회전이 필요하면 heading을 바꾸되, 이동-회전 커플링(orbit)은 별도 문제.
     private static final double TARGET_HEADING = Math.toRadians(0);
 
-    // === P 게인 (DashboardDriveOpMode와 정렬) ==================================
+    // === P 게인 — 진단용으로 속도 낮춤(관성 오버슈트 배제) ======================
     private static final double SIGN = -1.0;                 // 회전 부호 (실기 확정)
-    private static final double KP_POS = 1.2;                // 위치오차(m) → 속도
+    private static final double KP_POS = 0.9;                // 위치오차(m) → 속도
     private static final double KP_HEADING = 0.6;            // 방향오차(rad) → 회전
-    private static final double MAX_DRIVE = 0.5;             // 병진 출력 상한 (안전)
-    private static final double MAX_TURN = 0.45;             // 회전 출력 상한
+    private static final double MAX_DRIVE = 0.25;            // 병진 출력 상한 (느리게 → 슬립/관성↓)
+    private static final double MAX_TURN = 0.35;             // 회전 출력 상한
 
     // === 도달/게이트 =====================================================
     private static final double POS_TOLERANCE = 0.03;        // m (3cm)
@@ -57,6 +60,14 @@ public class GoToPointTest extends LinearOpMode {
         loc.resetPose();
 
         boolean headingLatched = false;
+
+        // 주행 중 pose를 로봇 내부 파일에 기록 (연결 불필요). 끝나면 adb pull /sdcard/gotolog.csv
+        FileWriter fw = null;
+        try {
+            fw = new FileWriter(new File("/sdcard/gotolog.csv"));
+            fw.write("t_ms,tx,ty,x,y,h_deg,vx,vy,w,posErr\n");
+        } catch (Exception ignored) {}
+        long t0 = System.currentTimeMillis();
 
         while (opModeIsActive()) {
             loc.update();
@@ -100,6 +111,15 @@ public class GoToPointTest extends LinearOpMode {
             boolean reached = posErr < POS_TOLERANCE && absHeadingErr < HEADING_TOLERANCE;
             drive.driveRobotRelative(vx, vy, w);
 
+            // pose 로깅 (한 줄/루프)
+            if (fw != null) {
+                try {
+                    fw.write(String.format("%d,%.3f,%.3f,%.4f,%.4f,%.1f,%.3f,%.3f,%.3f,%.4f\n",
+                            System.currentTimeMillis() - t0, TARGET_X, TARGET_Y,
+                            x, y, Math.toDegrees(th), vx, vy, w, posErr));
+                } catch (Exception ignored) {}
+            }
+
             telemetry.addData("상태", reached ? ">>> 목표 도달!" : "이동중...");
             telemetry.addData("목표", "X=%.2f Y=%.2f θ=%.0f°", TARGET_X, TARGET_Y, Math.toDegrees(TARGET_HEADING));
             telemetry.addData("pose", "X=%.3f Y=%.3f θ=%.1f°", x, y, Math.toDegrees(th));
@@ -109,6 +129,9 @@ public class GoToPointTest extends LinearOpMode {
         }
 
         drive.driveRobotRelative(0, 0, 0);
+        if (fw != null) {
+            try { fw.flush(); fw.close(); } catch (Exception ignored) {}
+        }
     }
 
     private static double normalizeAngle(double a) {

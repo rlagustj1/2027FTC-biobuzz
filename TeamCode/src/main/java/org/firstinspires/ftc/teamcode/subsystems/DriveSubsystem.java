@@ -20,12 +20,13 @@ public class DriveSubsystem extends SubsystemBase {
         lb = hardwareMap.get(DcMotorEx.class, "lb");
         rb = hardwareMap.get(DcMotorEx.class, "rb");
 
-        // TODO: 실기 확인 필요 — 전진 명령 시 로봇이 실제로 앞으로 가는지 보고
-        // 방향이 반대면 여기서 FORWARD/REVERSE를 바꿀 것 (메카넘은 한쪽 반전이 표준).
-        lf.setDirection(DcMotor.Direction.FORWARD);
-        lb.setDirection(DcMotor.Direction.FORWARD);
-        rf.setDirection(DcMotor.Direction.REVERSE);
-        rb.setDirection(DcMotor.Direction.REVERSE);
+        // 실기 확정(MotorMappingTest, 재배선 후): +power에서 왼쪽(lf,lb)이 뒤로, 오른쪽(rf,rb)이
+        // 앞으로 돌았음. 왼쪽을 REVERSE로 잡아 네 바퀴 모두 정방향=전진이 되게 함.
+        // (메카넘은 좌우 미러 장착이라 한쪽 반전이 표준)
+        lf.setDirection(DcMotor.Direction.REVERSE);
+        lb.setDirection(DcMotor.Direction.REVERSE);
+        rf.setDirection(DcMotor.Direction.FORWARD);
+        rb.setDirection(DcMotor.Direction.FORWARD);
 
         for (DcMotorEx motor : new DcMotorEx[]{lf, rf, lb, rb}) {
             motor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
