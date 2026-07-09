@@ -24,8 +24,14 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))          # pc/ai
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # pc
 
-from perception import MockPerception, Detection      # noqa: E402
-from planner import MockPlanner, Goal                 # noqa: E402
+# Windows 콘솔(cp949)에서도 유니코드 출력 가능하게
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except AttributeError:
+    pass
+
+from perception import MockPerception, OpenCvPerception, Detection   # noqa: E402
+from planner import MockPlanner, OllamaVLMPlanner, Goal              # noqa: E402
 
 
 class SimLink:
@@ -112,9 +118,10 @@ class Orchestrator:
             return None
         rx, ry, _ = pose
         nearest = min(cands, key=lambda d: (d.field_x - rx) ** 2 + (d.field_y - ry) ** 2)
-        # 목표 물체를 바라보는 heading 계산
-        h = math.atan2(nearest.field_y - ry, nearest.field_x - rx)
-        return (nearest.field_x, nearest.field_y, h)
+        # 목표 물체 위치로 이동. heading은 고정(0)으로 둬 goto 목표가 흔들리지 않게 한다.
+        # (매 루프 "바라보는 각" 재계산 시 목표각이 진동 → 로봇 heading 래치가 계속 리셋됨.
+        #  실로봇 데모 안정성 우선. 물체 조준이 필요하면 도달 후 별도 회전 단계로 분리 권장.)
+        return (nearest.field_x, nearest.field_y, 0.0)
 
     def _pose_tuple(self):
         p = self.link.latest_pose
@@ -129,6 +136,11 @@ def main():
     ap.add_argument("--host", default="192.168.43.1")
     ap.add_argument("--port", type=int, default=9999)
     ap.add_argument("--seconds", type=float, default=0, help="0이면 무한 실행")
+    # 실제 AI 켜기 (없으면 Mock)
+    ap.add_argument("--real-planner", action="store_true", help="Ollama LLM으로 판단(느림)")
+    ap.add_argument("--model", default="qwen2.5-coder:7b", help="Ollama 모델명")
+    ap.add_argument("--real-perception", action="store_true", help="OpenCV 색검출(카메라 필요)")
+    ap.add_argument("--camera", type=int, default=0, help="카메라 인덱스")
     args = ap.parse_args()
 
     if args.sim:
@@ -138,9 +150,27 @@ def main():
         link = RobotLink(args.host, args.port)
         link.connect()
 
-    orch = Orchestrator(link, MockPerception(), MockPlanner())
+    # 인식 계층: 실제(OpenCV 카메라) or Mock
+    if args.real_perception:
+        perception = OpenCvPerception(camera_index=args.camera)
+        print(f"[인식] OpenCV 색검출 (카메라 {args.camera})")
+    else:
+        perception = MockPerception()
+        print("[인식] Mock (고정 red_block @ 0.5,0.3)")
+
+    # 판단 계층: 실제(Ollama) or Mock
+    if args.real_planner:
+        planner = OllamaVLMPlanner(model=args.model)
+        print(f"[판단] Ollama {args.model} — 워밍업 중(모델 로딩)...")
+        planner.warmup()
+        print("[판단] 워밍업 완료")
+    else:
+        planner = MockPlanner()
+        print("[판단] Mock (규칙기반)")
+
+    orch = Orchestrator(link, perception, planner)
     orch.start()
-    print("[오케스트레이터] 3계층 가동 (perception 30Hz / planner 0.2Hz / control 20Hz)")
+    print("[오케스트레이터] 3계층 가동 (perception 30Hz / planner / control 20Hz)")
 
     try:
         if args.seconds > 0:
